@@ -1,0 +1,145 @@
+/* Copyright (c) 1996-2026 The OPC Foundation. All rights reserved.
+   The source code in this file is covered under a dual-license scenario:
+     - RCL: for OPC Foundation Corporate Members in good-standing
+     - GPL V2: everybody else
+   RCL license terms accompanied with this source code. See http://opcfoundation.org/License/RCL/1.00/
+   GNU General Public License as published by the Free Software Foundation;
+   version 2 of the License are accompanied with this source code. See http://opcfoundation.org/License/GPLv2
+   This source code is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+*/
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Security.Cryptography.X509Certificates;
+using Microsoft.Extensions.Logging;
+using Opc.Ua.Security.Certificates;
+
+namespace Opc.Ua.Bindings
+{
+    /// <summary>
+    /// Creates a new <see cref="WebSocketTransportListener"/> with
+    /// <see cref="ITransportListener"/> interface.
+    /// </summary>
+    public abstract class WebSocketServiceHost : ITransportListenerFactory
+    {
+        /// <summary>
+        /// The protocol supported by the listener.
+        /// </summary>
+        public abstract string UriScheme { get; }
+
+        /// <summary>
+        /// The method creates a new instance of a <see cref="WebSocketTransportListener"/>.
+        /// </summary>
+        /// <returns>The transport listener.</returns>
+        public abstract ITransportListener Create(ITelemetryContext telemetry);
+
+        /// <inheritdoc/>
+        /// <summary>
+        /// Create a new service host for UA WebSocket.
+        /// </summary>
+        public List<EndpointDescription> CreateServiceHost(
+            ServerBase serverBase,
+            IDictionary<string, ServiceHost> hosts,
+            ApplicationConfiguration configuration,
+            IList<string> baseAddresses,
+            ApplicationDescription serverDescription,
+            List<ServerSecurityPolicy> securityPolicies,
+            CertificateTypesProvider certificateTypesProvider)
+        {
+            // generate a unique host name.
+            string hostName = "/WebSocket";
+
+            if (hosts.ContainsKey(hostName))
+            {
+                hostName += Utils.Format("/{0}", hosts.Count);
+            }
+
+            // build list of uris.
+            var uris = new List<Uri>();
+            var endpoints = new EndpointDescriptionCollection();
+
+            // create the endpoint configuration to use.
+            var endpointConfiguration = EndpointConfiguration.Create(configuration);
+            string computerName = Utils.GetHostName();
+
+            // create intermediate logger for just this call.
+            ILogger logger = serverBase.MessageContext.Telemetry.CreateLogger<WebSocketServiceHost>();
+
+            for (int ii = 0; ii < baseAddresses.Count; ii++)
+            {
+                if (!baseAddresses[ii].StartsWith(Utils.UriSchemeOpcWss, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var uri = new UriBuilder(baseAddresses[ii]);
+
+                if (uri.Path[^1] != '/')
+                {
+                    uri.Path += "/";
+                }
+
+                if (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase))
+                {
+                    uri.Host = computerName;
+                }
+
+                uris.Add(uri.Uri);
+
+                ServerSecurityPolicy bestPolicy = null;
+                byte bestLevel = 0;
+                foreach (ServerSecurityPolicy policy in securityPolicies)
+                {
+                    byte policyLevel = ServerSecurityPolicy.CalculateSecurityLevel(policy.SecurityMode, policy.SecurityPolicyUri, logger);
+                    if (bestPolicy == null || policyLevel > bestLevel)
+                    {
+                        bestPolicy = policy;
+                        bestLevel = ServerSecurityPolicy.CalculateSecurityLevel(bestPolicy.SecurityMode, bestPolicy.SecurityPolicyUri, logger);
+                    }
+                }
+
+                EndpointDescription endpoint = new EndpointDescription
+                {
+                    EndpointUrl = uri.Uri.ToString(),
+                    Server = serverDescription,
+                    SecurityMode = bestPolicy.SecurityMode,
+                    SecurityPolicyUri = bestPolicy.SecurityPolicyUri,
+                    SecurityLevel = bestLevel,
+                    ServerCertificate = certificateTypesProvider.GetInstanceCertificate(bestPolicy.SecurityPolicyUri).RawData,
+                    TransportProfileUri = Profiles.UaWssTransport
+                };
+
+                endpoint.UserIdentityTokens = serverBase.GetUserTokenPolicies(
+                    configuration,
+                    endpoint);
+
+                logger.LogInformation(
+                    "WebSocket Endpoint: {EndpointUrl} - Security Mode: {SecurityMode} - Policy: {SecurityPolicyUri}",
+                    endpoint.EndpointUrl,
+                    endpoint.SecurityMode,
+                    endpoint.SecurityPolicyUri);
+
+                ITransportListener listener = Create(serverBase.MessageContext.Telemetry);
+                if (listener != null)
+                {
+                    endpoints.Add(endpoint);
+                    serverBase.CreateServiceHostEndpoint(
+                        uri.Uri,
+                        endpoints,
+                        endpointConfiguration,
+                        listener,
+                        configuration.CertificateValidator.GetChannelValidator());
+                }
+                else
+                {
+                    logger.LogError("Failed to create endpoint {Uri} because the transport profile is unsupported.", uri);
+                }
+            }
+
+            return endpoints;
+        }
+    }
+}
