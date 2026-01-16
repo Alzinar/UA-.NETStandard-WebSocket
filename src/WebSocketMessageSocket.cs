@@ -100,6 +100,11 @@ namespace Opc.Ua.Bindings
         public TransportChannelFeatures MessageSocketFeatures =>
             TransportChannelFeatures.Reconnect;
 
+        public Task ConnectAsync(Uri endpointUrl, CancellationToken ct = default)
+        {
+            throw new NotImplementedException();
+        }
+
         /// <summary>
         /// Connects to an endpoint.
         /// </summary>
