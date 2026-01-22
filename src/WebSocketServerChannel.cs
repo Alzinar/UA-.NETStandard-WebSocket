@@ -14,7 +14,7 @@ namespace Opc.Ua.Bindings
     /// <summary>
     /// Manages the server side of a UA WebSocket channel.
     /// </summary>
-    internal class WebSocketServerChannel :WebSocketListenerChannel
+    internal class WebSocketServerChannel : WebSocketListenerChannel
     {
         private readonly ILogger m_logger;
         private SortedDictionary<uint, IServiceResponse> m_queuedResponses;
@@ -299,6 +299,11 @@ namespace Opc.Ua.Bindings
                             Utils.TraceMasks.ServiceDetail,
                             "ChannelId {Id}: ProcessHelloMessage",
                             ChannelId);
+                        m_logger.LogInformation(
+                            "{Channel} Received Hello Message, ChannelId={ChannelId}, Socket={SocketHandle:X8}",
+                            ChannelName,
+                            ChannelId,
+                            Socket?.Handle);
                         return ProcessHelloMessage(messageChunk);
                     }
 
@@ -426,8 +431,14 @@ namespace Opc.Ua.Bindings
                             endpointUrl[ii] = decoder.ReadByte(null);
                         }
 
-                        if (!SetEndpointUrl(
-                            Encoding.UTF8.GetString(endpointUrl, 0, endpointUrl.Length)))
+                        // Convert opc.wss:// to wss://
+                        m_logger.LogInformation("Original endpoint URL: {OriginalUrl}", endpointUrl);
+                        var wsUri = new UriBuilder(Encoding.UTF8.GetString(endpointUrl, 0, endpointUrl.Length))
+                        {
+                            Scheme = "opc.wss"
+                        };
+                        var wsUriString = wsUri.ToString();
+                        if (!SetEndpointUrl(wsUriString))
                         {
                             ForceChannelFault(StatusCodes.BadTcpEndpointUrlInvalid);
                             return false;
@@ -1314,6 +1325,6 @@ namespace Opc.Ua.Bindings
             return true;
         }
 
-    
+
     }
 }
