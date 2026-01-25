@@ -47,7 +47,7 @@ namespace Opc.Ua.Bindings
             IList<string> baseAddresses,
             ApplicationDescription serverDescription,
             List<ServerSecurityPolicy> securityPolicies,
-            CertificateTypesProvider certificateTypesProvider)
+            CertificateTypesProvider instanceCertificateTypesProvider)
         {
             // generate a unique host name.
             string hostName = "/WebSocket";
@@ -87,51 +87,47 @@ namespace Opc.Ua.Bindings
                     uri.Host = computerName;
                 }
 
-                uris.Add(uri.Uri);
-
-                ServerSecurityPolicy bestPolicy = null;
-                byte bestLevel = 0;
-                foreach (ServerSecurityPolicy policy in securityPolicies)
-                {
-                    byte policyLevel = ServerSecurityPolicy.CalculateSecurityLevel(policy.SecurityMode, policy.SecurityPolicyUri, logger);
-                    if (bestPolicy == null || policyLevel > bestLevel)
-                    {
-                        bestPolicy = policy;
-                        bestLevel = ServerSecurityPolicy.CalculateSecurityLevel(bestPolicy.SecurityMode, bestPolicy.SecurityPolicyUri, logger);
-                    }
-                }
-
-                EndpointDescription endpoint = new EndpointDescription
-                {
-                    EndpointUrl = uri.Uri.ToString(),
-                    Server = serverDescription,
-                    SecurityMode = bestPolicy.SecurityMode,
-                    SecurityPolicyUri = bestPolicy.SecurityPolicyUri,
-                    SecurityLevel = bestLevel,
-                    ServerCertificate = certificateTypesProvider.GetInstanceCertificate(bestPolicy.SecurityPolicyUri).RawData,
-                    TransportProfileUri = Profiles.UaWssTransport
-                };
-
-                endpoint.UserIdentityTokens = serverBase.GetUserTokenPolicies(
-                    configuration,
-                    endpoint);
-
-                logger.LogInformation(
-                    "WebSocket Endpoint: {EndpointUrl} - Security Mode: {SecurityMode} - Policy: {SecurityPolicyUri}",
-                    endpoint.EndpointUrl,
-                    endpoint.SecurityMode,
-                    endpoint.SecurityPolicyUri);
-
                 ITransportListener listener = Create(serverBase.MessageContext.Telemetry);
                 if (listener != null)
                 {
-                    endpoints.Add(endpoint);
+
+                    var listenerEndpoints = new EndpointDescriptionCollection();
+                    uris.Add(uri.Uri);
+
+                    foreach (ServerSecurityPolicy policy in securityPolicies)
+                    {
+                        // create the endpoint description.
+                        var description = new EndpointDescription
+                        {
+                            EndpointUrl = uri.ToString(),
+                            Server = serverDescription,
+                            TransportProfileUri = Profiles.UaTcpTransport,
+                            SecurityMode = policy.SecurityMode,
+                            SecurityPolicyUri = policy.SecurityPolicyUri,
+                            SecurityLevel = ServerSecurityPolicy.CalculateSecurityLevel(
+                                policy.SecurityMode,
+                                policy.SecurityPolicyUri,
+                                logger)
+                        };
+                        description.UserIdentityTokens = serverBase.GetUserTokenPolicies(
+                            configuration,
+                            description);
+
+                        ServerBase.SetServerCertificateInEndpointDescription(
+                            description,
+                            instanceCertificateTypesProvider);
+
+                        listenerEndpoints.Add(description);
+                    }
+
                     serverBase.CreateServiceHostEndpoint(
                         uri.Uri,
-                        endpoints,
+                        listenerEndpoints,
                         endpointConfiguration,
                         listener,
                         configuration.CertificateValidator.GetChannelValidator());
+
+                    endpoints.AddRange(listenerEndpoints);
                 }
                 else
                 {
