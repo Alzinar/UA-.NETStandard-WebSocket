@@ -41,7 +41,8 @@ namespace Opc.Ua.Bindings
             {
                 if (context.WebSockets.IsWebSocketRequest)
                 {
-                    var webSocket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
+                    // Accept WebSocket with OPC UA binary encoding subprotocol
+                    var webSocket = await context.WebSockets.AcceptWebSocketAsync("opcua+uacp").ConfigureAwait(false);
                     await Listener.HandleWebSocketConnectionAsync(context, webSocket).ConfigureAwait(false);
                 }
                 else
