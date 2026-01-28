@@ -101,7 +101,7 @@ namespace Opc.Ua.Bindings
                         {
                             EndpointUrl = uri.ToString(),
                             Server = serverDescription,
-                            TransportProfileUri = Profiles.UaTcpTransport,
+                            TransportProfileUri = Profiles.UaWssTransport,
                             SecurityMode = policy.SecurityMode,
                             SecurityPolicyUri = policy.SecurityPolicyUri,
                             SecurityLevel = ServerSecurityPolicy.CalculateSecurityLevel(
