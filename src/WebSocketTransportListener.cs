@@ -8,6 +8,8 @@ using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Opc.Ua.Security.Certificates;
 
@@ -31,8 +33,7 @@ namespace Opc.Ua.Bindings
 
         private readonly ILogger m_logger;
         private readonly ITelemetryContext m_telemetry;
-        // private IWebHostBuilder m_hostBuilder;
-        private IWebHost m_host;
+        private IHost m_host;
         private BufferManager m_bufferManager;
         private CertificateTypesProvider m_serverCertificateTypesProvider;
         private ChannelQuotas m_quotas;
@@ -191,54 +192,47 @@ namespace Opc.Ua.Bindings
         public void Start()
         {
             WebSocketStartup.Listener = this;
-            var m_hostBuilder = new WebHostBuilder();
 
             // Get server certificate for TLS
             var serverCertificate = m_serverCertificateTypesProvider?.GetInstanceCertificate(
                 SecurityPolicies.Basic256Sha256);
 
             UriHostNameType hostType = Uri.CheckHostName(EndpointUrl.Host);
-            if (hostType is UriHostNameType.Dns or UriHostNameType.Unknown or UriHostNameType.Basic)
-            {
-                // bind to any address
-                m_hostBuilder.UseKestrel(options =>
-                {
-                    if (serverCertificate != null)
-                    {
-                        options.ListenAnyIP(EndpointUrl.Port, listenOptions =>
-                        {
-                            listenOptions.UseHttps(serverCertificate);
-                        });
-                    }
-                    else
-                    {
-                        options.ListenAnyIP(EndpointUrl.Port);
-                    }
-                });
-            }
-            else
-            {
-                // bind to specific address
-                var ipAddress = IPAddress.Parse(EndpointUrl.Host);
-                m_hostBuilder.UseKestrel(options =>
-                {
-                    if (serverCertificate != null)
-                    {
-                        options.Listen(ipAddress, EndpointUrl.Port, listenOptions =>
-                        {
-                            listenOptions.UseHttps(serverCertificate);
-                        });
-                    }
-                    else
-                    {
-                        options.Listen(ipAddress, EndpointUrl.Port);
-                    }
-                });
-            }
+            IPAddress ipAddress = hostType is UriHostNameType.Dns or UriHostNameType.Unknown or UriHostNameType.Basic
+                ? null
+                : IPAddress.Parse(EndpointUrl.Host);
 
-            m_hostBuilder.UseContentRoot(Directory.GetCurrentDirectory());
-            m_hostBuilder.UseStartup<WebSocketStartup>();
-            m_host = m_hostBuilder.Start(Utils.ReplaceLocalhost(EndpointUrl.ToString()));
+            IHostBuilder hostBuilder = Host.CreateDefaultBuilder()
+                .ConfigureWebHostDefaults(webBuilder =>
+                {
+                    webBuilder.UseKestrel(options =>
+                    {
+                        void ConfigureListenOptions(ListenOptions listenOptions)
+                        {
+                            if (serverCertificate != null)
+                            {
+                                listenOptions.UseHttps(serverCertificate);
+                            }
+                        }
+
+                        if (ipAddress == null)
+                        {
+                            // bind to any address
+                            options.ListenAnyIP(EndpointUrl.Port, ConfigureListenOptions);
+                        }
+                        else
+                        {
+                            // bind to specific address
+                            options.Listen(ipAddress, EndpointUrl.Port, ConfigureListenOptions);
+                        }
+                    });
+                    webBuilder.UseContentRoot(Directory.GetCurrentDirectory());
+                    webBuilder.UseUrls(Utils.ReplaceLocalhost(EndpointUrl.ToString()));
+                    webBuilder.UseStartup<WebSocketStartup>();
+                });
+
+            m_host = hostBuilder.Build();
+            m_host.Start();
 
             m_logger.LogInformation("WebSocket listener started on {EndpointUrl}", EndpointUrl);
         }

@@ -70,6 +70,9 @@ namespace Opc.Ua.Bindings
         /// </summary>
         public event WebSocketChannelStatusEventHandler StatusChanged;
 
+        // AsyncResultBase is obsolete but required to match the IAsyncResult based
+        // BeginReverseConnect/EndReverseConnect pattern used by TcpServerChannel.
+#pragma warning disable CS0618
         private class ReverseConnectAsyncResult : AsyncResultBase
         {
             public ReverseConnectAsyncResult(
@@ -83,6 +86,7 @@ namespace Opc.Ua.Bindings
 
             public IMessageSocket Socket;
         }
+#pragma warning restore CS0618
 
         /// <summary>
         /// Begin a reverse connect.
