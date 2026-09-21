@@ -11,6 +11,7 @@
 */
 
 using System;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.WebSockets;
@@ -264,25 +265,68 @@ namespace Opc.Ua.Bindings
                     return;
                 }
 
-                if (result.Count > 0)
+                int count = result.Count;
+
+                if (!result.EndOfMessage)
                 {
-                    m_logger.LogDebug("Received WebSocket message of {MessageSize} bytes, EndOfMessage={EndOfMessage}",
-                        result.Count, result.EndOfMessage);
+                    // Slow path: the message is fragmented across frames - reassemble before delivering it.
+                    using var stream = new MemoryStream();
+                    stream.Write(buffer, 0, count);
+                    m_bufferManager.ReturnBuffer(buffer, "ReadNextMessageAsync");
+                    buffer = null;
+
+                    while (!result.EndOfMessage)
+                    {
+                        byte[] continuation = m_bufferManager.TakeBuffer(m_receiveBufferSize, "ReadNextMessageAsync");
+                        try
+                        {
+                            result = await m_webSocket.ReceiveAsync(
+                                new ArraySegment<byte>(continuation, 0, continuation.Length - 1),
+                                CancellationToken.None).ConfigureAwait(false);
+
+                            if (result.MessageType == WebSocketMessageType.Close)
+                            {
+                                m_logger.LogInformation("WebSocket close frame received while reassembling a message - CloseStatus: {CloseStatus}, CloseDescription: {CloseDescription}",
+                                    result.CloseStatus, result.CloseStatusDescription);
+                                m_sink?.OnReceiveError(this, ServiceResult.Create(
+                                    StatusCodes.BadConnectionClosed,
+                                    "WebSocket closed by remote endpoint"));
+                                return;
+                            }
+
+                            stream.Write(continuation, 0, result.Count);
+                        }
+                        finally
+                        {
+                            m_bufferManager.ReturnBuffer(continuation, "ReadNextMessageAsync");
+                        }
+                    }
+
+                    count = (int)stream.Length;
+                    buffer = m_bufferManager.TakeBuffer(count, "ReadNextMessageAsync");
+                    Buffer.BlockCopy(stream.GetBuffer(), 0, buffer, 0, count);
+
+                    m_logger.LogDebug("Reassembled fragmented WebSocket message into {MessageSize} bytes", count);
+                }
+
+                if (count > 0)
+                {
+                    m_logger.LogDebug("Received WebSocket message of {MessageSize} bytes", count);
 
                     if (m_sink != null)
                     {
                         // Pass the buffer to the sink - it will return it to the buffer manager
-                        var messageChunk = new ArraySegment<byte>(buffer, 0, result.Count);
+                        var messageChunk = new ArraySegment<byte>(buffer, 0, count);
 
                         // Log first few bytes for debugging
-                        var preview = string.Join(" ", messageChunk.Array.Take(Math.Min(16, result.Count)).Select(b => b.ToString("X2")));
+                        var preview = string.Join(" ", messageChunk.Array.Take(Math.Min(16, count)).Select(b => b.ToString("X2")));
                         m_logger.LogDebug("Message bytes (first 16): {Preview}", preview);
 
                         m_sink.OnMessageReceived(this, messageChunk);
                     }
                     else
                     {
-                        m_logger.LogWarning("Received WebSocket message but sink is null, discarding {MessageSize} bytes", result.Count);
+                        m_logger.LogWarning("Received WebSocket message but sink is null, discarding {MessageSize} bytes", count);
                         m_bufferManager.ReturnBuffer(buffer, "ReadNextMessageAsync");
                     }
 
@@ -296,7 +340,10 @@ namespace Opc.Ua.Bindings
             catch (Exception ex)
             {
                 m_logger.LogError(ex, "Error receiving WebSocket message");
-                m_bufferManager.ReturnBuffer(buffer, "ReadNextMessageAsync");
+                if (buffer != null)
+                {
+                    m_bufferManager.ReturnBuffer(buffer, "ReadNextMessageAsync");
+                }
             }
         }
 
