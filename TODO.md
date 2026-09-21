@@ -158,12 +158,12 @@ not fixed. Verified independently against the SDK's TCP transport.
 
 ## Phase 3 — Server hardening / security
 
-- [ ] **3.1 — No silent WSS → plaintext downgrade**
+- [x] **3.1 — No silent WSS → plaintext downgrade**
   `src/WebSocketTransportListener.cs` · `Start`
-  If `GetInstanceCertificate` returns null we bind plain HTTP while `WebSocketServiceHost`
-  still advertises `opc.wss://` and `Profiles.UaWssTransport` — clients believe they are
-  encrypted. (Reference has the same hole.)
-  Fix: fail fast with a clear error when no server certificate is available for a wss endpoint.
+  Fixed: TLS is now required whenever `EndpointUrl.Scheme == Utils.UriSchemeOpcWss`; `Start()`
+  throws `ServiceResultException(BadConfigurationError)` if no server certificate can be
+  resolved, instead of silently binding plain HTTP. Also wired TLS client-certificate
+  validation into Kestrel via the existing `m_quotas.CertificateValidator`.
 
 - [ ] **3.2 — Do not hardcode `Basic256Sha256` for the TLS certificate**
   `src/WebSocketTransportListener.cs` · `Start`
@@ -187,19 +187,20 @@ not fixed. Verified independently against the SDK's TCP transport.
 
 Recorded so they are not lost; the reference does not implement these either.
 
-- [ ] **4.1 — Implement `ConnectAsync`; retire `BeginConnect`**
-  `IMessageSocket` declares only `ConnectAsync`, and `UaSCUaBinaryClientChannel` calls it.
-  Ours throws `NotImplementedException`, so the ~60 lines of `BeginConnect` are unreachable
-  dead code.
-- [ ] **4.2 — Client must offer the `opcua+uacp` subprotocol**
-  The server requires it (correctly — this is why opcjs works). A .NET client built on
-  `BeginConnect` never offers it, so the handshake fails:
-  `The WebSocket client request requested '' protocol(s), but server is only accepting 'opcua+uacp' protocol(s).`
-  Fix: `clientWebSocket.Options.AddSubProtocol("opcua+uacp")`.
-- [ ] **4.3 — Remove the client TLS validation bypass**
-  `RemoteCertificateValidationCallback = (…) => true` accepts any certificate (MITM,
-  OWASP A02/A07). Delegate to the OPC UA `CertificateValidator`
-  (`Quotas.CertificateValidator`). Must not ship as-is.
+- [x] **4.1 — Implement `ConnectAsync`; retire `BeginConnect`**
+  `IMessageSocket` declares only `ConnectAsync`, and `UaSCUaBinaryClientChannel` calls it
+  for forward connects. Implemented, matching the reference `TcpMessageSocket.ConnectAsync`
+  contract (throws on failure, no swallow-into-eventargs). `BeginConnect` was **not** retired:
+  `WebSocketServerChannel.BeginReverseConnect` still calls it for the reverse-connect path,
+  so both now share a private `ConnectClientWebSocketAsync` helper with the same fixes.
+- [x] **4.2 — Client must offer the `opcua+uacp` subprotocol**
+  Fixed in `ConnectClientWebSocketAsync`: `clientWebSocket.Options.AddSubProtocol("opcua+uacp")`.
+- [x] **4.3 — Remove the client TLS validation bypass**
+  Removed the `RemoteCertificateValidationCallback = (…) => true` bypass entirely; the
+  client now relies on the default .NET/OS TLS trust-store validation. Full delegation to
+  the OPC UA `ICertificateValidator` isn't wireable here: `IMessageSocketFactory.Create(sink,
+  bufferManager, receiveBufferSize)` and `IMessageSink` don't expose it, so the socket layer
+  has no access to `Quotas.CertificateValidator`.
 - [ ] **4.4 — Implement reconnect paths**
   `WebSocketListenerChannel.Reconnect`, `ReconnectToExistingChannel` and
   `TransferListenerChannelAsync` all throw. `WebSocketServerChannel` already contains the

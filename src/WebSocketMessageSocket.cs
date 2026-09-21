@@ -101,20 +101,46 @@ namespace Opc.Ua.Bindings
         public TransportChannelFeatures MessageSocketFeatures =>
             TransportChannelFeatures.Reconnect;
 
-        public Task ConnectAsync(Uri endpointUrl, CancellationToken ct = default)
+        public async Task ConnectAsync(Uri endpointUrl, CancellationToken ct = default)
         {
-            throw new NotImplementedException();
+            if (endpointUrl == null)
+            {
+                throw new ArgumentNullException(nameof(endpointUrl));
+            }
+
+            if (m_webSocket != null)
+            {
+                throw new InvalidOperationException("The WebSocket is already connected.");
+            }
+
+            ClientWebSocket clientWebSocket;
+            try
+            {
+                clientWebSocket = await ConnectClientWebSocketAsync(endpointUrl, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                m_logger.LogError(ex, "Failed to connect WebSocket to {EndpointUrl}", endpointUrl);
+                throw;
+            }
+
+            m_webSocket = clientWebSocket;
+            m_remoteEndpoint = new DnsEndPoint(endpointUrl.DnsSafeHost, endpointUrl.Port);
+            m_localEndpoint = new DnsEndPoint("localhost", 0);
+
+            m_logger.LogInformation("WebSocket connected to {EndpointUrl}", endpointUrl);
         }
 
         /// <summary>
-        /// Connects to an endpoint.
+        /// Connects to an endpoint. Used for the reverse-connect path (see
+        /// <see cref="WebSocketServerChannel.BeginReverseConnect"/>); forward connects go
+        /// through <see cref="ConnectAsync"/>.
         /// </summary>
         public bool BeginConnect(
             Uri endpointUrl,
             EventHandler<IMessageSocketAsyncEventArgs> callback,
             object state)
         {
-            m_logger.LogInformation("BeginConnect called for endpoint URL: {EndpointUrl}", endpointUrl);
             if (endpointUrl == null)
             {
                 throw new ArgumentNullException(nameof(endpointUrl));
@@ -131,36 +157,17 @@ namespace Opc.Ua.Bindings
 
                 try
                 {
-                    var clientWebSocket = new ClientWebSocket();
-
-#if NET8_0_OR_GREATER
-                    // Skip certificate validation for development/testing (only available in .NET 8+)
-                    clientWebSocket.Options.RemoteCertificateValidationCallback =
-                        (sender, certificate, chain, sslPolicyErrors) => true;
-#endif
-
-                    // Convert opc.wss:// to wss://
-                    m_logger.LogInformation("Original endpoint URL: {OriginalUrl}", endpointUrl);
-                    var wsUri = new UriBuilder(endpointUrl)
-                    {
-                        Scheme = "wss"
-                    };
-
-                    m_logger.LogInformation("Connecting to WebSocket endpoint: {EndpointUrl}", wsUri.Uri);
-
-                    await clientWebSocket.ConnectAsync(wsUri.Uri, CancellationToken.None).ConfigureAwait(false);
-
-                    m_logger.LogInformation("WebSocket connection established. Setting m_webSocket.");
-                    m_webSocket = clientWebSocket;
+                    m_webSocket = await ConnectClientWebSocketAsync(endpointUrl, CancellationToken.None)
+                        .ConfigureAwait(false);
                     m_remoteEndpoint = new DnsEndPoint(endpointUrl.DnsSafeHost, endpointUrl.Port);
                     m_localEndpoint = new DnsEndPoint("localhost", 0);
 
                     eventArgs.IsSocketError = false;
-                    m_logger.LogInformation("WebSocket connected successfully");
+                    m_logger.LogInformation("WebSocket connected to {EndpointUrl}", endpointUrl);
                 }
                 catch (Exception ex)
                 {
-                    m_logger.LogError(ex, "Failed to connect WebSocket");
+                    m_logger.LogError(ex, "Failed to connect WebSocket to {EndpointUrl}", endpointUrl);
                     eventArgs.IsSocketError = true;
                     eventArgs.SocketErrorString = ex.Message;
                 }
@@ -169,6 +176,38 @@ namespace Opc.Ua.Bindings
             });
 
             return true;
+        }
+
+        /// <summary>
+        /// Opens and connects a <see cref="ClientWebSocket"/> for <paramref name="endpointUrl"/>.
+        /// </summary>
+        private async Task<ClientWebSocket> ConnectClientWebSocketAsync(Uri endpointUrl, CancellationToken ct)
+        {
+            var clientWebSocket = new ClientWebSocket();
+
+            // required by the server (WebSocketStartup.AcceptWebSocketAsync) - without it
+            // the handshake fails with "... but server is only accepting 'opcua+uacp' protocol(s)".
+            clientWebSocket.Options.AddSubProtocol(kOpcUaBinarySubProtocol);
+
+            // opc.wss:// is not a scheme the OS TLS/WebSocket stack understands - use wss://.
+            // Server TLS certificate validation is left to the default .NET/OS trust store;
+            // IMessageSocketFactory.Create() is not given the app's ICertificateValidator, so
+            // it cannot be wired in here without changing the SDK's factory contract.
+            var wsUri = new UriBuilder(endpointUrl) { Scheme = "wss" }.Uri;
+
+            m_logger.LogInformation("Connecting to WebSocket endpoint: {EndpointUrl}", wsUri);
+
+            try
+            {
+                await clientWebSocket.ConnectAsync(wsUri, ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                clientWebSocket.Dispose();
+                throw;
+            }
+
+            return clientWebSocket;
         }
 
         /// <summary>
@@ -451,5 +490,7 @@ namespace Opc.Ua.Bindings
         private readonly object m_socketLock = new object();
         private EndPoint m_localEndpoint;
         private EndPoint m_remoteEndpoint;
+
+        private const string kOpcUaBinarySubProtocol = "opcua+uacp";
     }
 }

@@ -4,11 +4,14 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Opc.Ua.Security.Certificates;
@@ -193,9 +196,28 @@ namespace Opc.Ua.Bindings
         {
             WebSocketStartup.Listener = this;
 
-            // Get server certificate for TLS
-            var serverCertificate = m_serverCertificateTypesProvider?.GetInstanceCertificate(
-                SecurityPolicies.Basic256Sha256);
+            // opc.wss is the only supported scheme and is always TLS-secured per the OPC UA spec;
+            // fail fast instead of silently falling back to an unencrypted endpoint.
+            bool requireTls = string.Equals(
+                EndpointUrl.Scheme,
+                Utils.UriSchemeOpcWss,
+                StringComparison.OrdinalIgnoreCase);
+
+            X509Certificate2 serverCertificate = null;
+            if (requireTls)
+            {
+                serverCertificate = m_serverCertificateTypesProvider?.GetInstanceCertificate(
+                    SecurityPolicies.Basic256Sha256);
+
+                if (serverCertificate == null)
+                {
+                    throw new ServiceResultException(
+                        StatusCodes.BadConfigurationError,
+                        Utils.Format(
+                            "No server certificate is configured for the TLS-secured WebSocket endpoint {0}.",
+                            EndpointUrl));
+                }
+            }
 
             UriHostNameType hostType = Uri.CheckHostName(EndpointUrl.Host);
             IPAddress ipAddress = hostType is UriHostNameType.Dns or UriHostNameType.Unknown or UriHostNameType.Basic
@@ -209,9 +231,15 @@ namespace Opc.Ua.Bindings
                     {
                         void ConfigureListenOptions(ListenOptions listenOptions)
                         {
-                            if (serverCertificate != null)
+                            if (requireTls)
                             {
-                                listenOptions.UseHttps(serverCertificate);
+                                listenOptions.UseHttps(serverCertificate, httpsOptions =>
+                                {
+                                    // request (not require) a TLS client certificate and check it
+                                    // against the configured OPC UA certificate trust list.
+                                    httpsOptions.ClientCertificateMode = ClientCertificateMode.AllowCertificate;
+                                    httpsOptions.ClientCertificateValidation = ValidateClientCertificate;
+                                });
                             }
                         }
 
@@ -234,7 +262,34 @@ namespace Opc.Ua.Bindings
             m_host = hostBuilder.Build();
             m_host.Start();
 
-            m_logger.LogInformation("WebSocket listener started on {EndpointUrl}", EndpointUrl);
+            m_logger.LogInformation(
+                "WebSocket listener started on {EndpointUrl} (TLS: {RequireTls})",
+                EndpointUrl,
+                requireTls);
+        }
+
+        /// <summary>
+        /// Validates a TLS client certificate against the configured OPC UA certificate trust list.
+        /// </summary>
+        private bool ValidateClientCertificate(X509Certificate2 certificate, X509Chain chain, SslPolicyErrors errors)
+        {
+            ICertificateValidator validator = m_quotas?.CertificateValidator;
+            if (validator == null)
+            {
+                // no OPC UA validator configured - fall back to the TLS chain result.
+                return errors == SslPolicyErrors.None;
+            }
+
+            try
+            {
+                validator.ValidateAsync(certificate, CancellationToken.None).GetAwaiter().GetResult();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                m_logger.LogWarning(ex, "Rejected TLS client certificate {Subject}.", certificate?.Subject);
+                return false;
+            }
         }
 
         /// <summary>
