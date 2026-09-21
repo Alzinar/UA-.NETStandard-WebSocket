@@ -259,6 +259,7 @@ namespace Opc.Ua.Bindings
                     m_logger.LogInformation("WebSocket close frame received - CloseStatus: {CloseStatus}, CloseDescription: {CloseDescription}",
                         result.CloseStatus, result.CloseStatusDescription);
                     m_bufferManager.ReturnBuffer(buffer, "ReadNextMessageAsync");
+                    buffer = null;
                     m_sink?.OnReceiveError(this, ServiceResult.Create(
                         StatusCodes.BadConnectionClosed,
                         "WebSocket closed by remote endpoint"));
@@ -322,19 +323,21 @@ namespace Opc.Ua.Bindings
                         var preview = string.Join(" ", messageChunk.Array.Take(Math.Min(16, count)).Select(b => b.ToString("X2")));
                         m_logger.LogDebug("Message bytes (first 16): {Preview}", preview);
 
+                        // Ownership transfers to the sink here, even if OnMessageReceived throws.
+                        buffer = null;
                         m_sink.OnMessageReceived(this, messageChunk);
                     }
                     else
                     {
                         m_logger.LogWarning("Received WebSocket message but sink is null, discarding {MessageSize} bytes", count);
                         m_bufferManager.ReturnBuffer(buffer, "ReadNextMessageAsync");
+                        buffer = null;
                     }
-
-                    // Note: If sink is not null, it is responsible for returning the buffer
                 }
                 else
                 {
                     m_bufferManager.ReturnBuffer(buffer, "ReadNextMessageAsync");
+                    buffer = null;
                 }
             }
             catch (Exception ex)
