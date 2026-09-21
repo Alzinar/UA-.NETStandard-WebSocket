@@ -245,8 +245,9 @@ namespace Opc.Ua.Bindings
             try
             {
                 m_logger.LogDebug("Waiting to receive WebSocket message...");
+                // Reserve the last byte: BufferManager stores its lock cookie there.
                 var result = await m_webSocket.ReceiveAsync(
-                    new ArraySegment<byte>(buffer),
+                    new ArraySegment<byte>(buffer, 0, buffer.Length - 1),
                     CancellationToken.None).ConfigureAwait(false);
 
                 m_logger.LogDebug("Received WebSocket frame - Type: {MessageType}, Count: {Count}, EndOfMessage: {EndOfMessage}",
