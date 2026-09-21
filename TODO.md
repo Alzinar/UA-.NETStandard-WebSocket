@@ -102,16 +102,12 @@ not fixed. Verified independently against the SDK's TCP transport.
   it wasn't an intentional local `Close()`, `ReadNextMessage` now reports a generic
   `BadConnectionClosed` to the sink instead of exiting silently.
 
-- [ ] **2.2 — `MaxChannelCount` is computed but never enforced**
+- [x] **2.2 — `MaxChannelCount` is computed but never enforced**
   `src/WebSocketTransportListener.cs` · `HandleWebSocketConnectionAsync`
-  ```csharp
-  bool serveChannel = !(MaxChannelCount > 0 && MaxChannelCount < channelCount);
-  if (!serveChannel) { m_logger.LogError(...); }   // logged, then ignored
-  ```
-  The SDK's `TcpTransportListener.OnAccept` gates creation on this flag and disposes the
-  socket. We create the channel anyway → unbounded channel growth (DoS).
-  Fix: when `!serveChannel`, abort the WebSocket and return without creating a channel.
-  Also drop the hardcoded `bool isBlocked = false` or wire it to a real check.
+  Fixed: when `!serveChannel` (still at/above `MaxChannelCount` after the idle-cleanup
+  eviction attempt), the incoming `webSocket.Abort()` is now called and no channel/entry
+  is created, instead of just logging and creating the channel anyway. Also dropped the
+  hardcoded `bool isBlocked = false` (it never toggled and gated nothing).
 
 - [ ] **2.3 — Chunk ordering can be violated on send**
   `src/WebSocketMessageSocket.cs` · `Send`

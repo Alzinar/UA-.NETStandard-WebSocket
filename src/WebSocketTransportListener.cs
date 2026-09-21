@@ -330,13 +330,11 @@ namespace Opc.Ua.Bindings
 
             WebSocketListenerChannel channel = null;
             System.Net.WebSockets.WebSocket activeWebSocket = null;
-            bool isBlocked = false;
 
-            //repeatAccept = false;
             lock (m_lock)
             {
                 ConcurrentDictionary<uint, WebSocketListenerChannel> channels = m_channels;
-                if (channels != null && !isBlocked)
+                if (channels != null)
                 {
                     // TODO: .Count is flagged as hotpath, implement separate counter
                     int channelCount = channels.Count;
@@ -383,63 +381,66 @@ namespace Opc.Ua.Bindings
                             "OnAccept: Maximum number of channels {CurrentCount} reached, serving channels is stopped until number is lower or equal than {MaxChannelCount} ",
                             channelCount,
                             MaxChannelCount);
+
+                        // reject the connection instead of letting it through unbounded.
+                        webSocket.Abort();
                     }
-
-                    // check if the accept socket has been created.
-
-                    channel = null;
-                    try
+                    else
                     {
-
-                        channel = new WebSocketServerChannel(
-                                ListenerId,
-                                this,
-                                m_bufferManager,
-                                m_quotas,
-                                m_serverCertificateTypesProvider,
-                                m_descriptions,
-                                m_telemetry);
-
-                        if (m_callback != null)
-                        {
-                            channel.SetRequestReceivedCallback(
-                                new WebSocketChannelRequestEventHandler(OnRequestReceivedAsync));
-                            channel.SetReportOpenSecureChannelAuditCallback(
-                                new WebSocketReportAuditOpenSecureChannelEventHandler(
-                                    OnReportAuditOpenSecureChannelEvent));
-                            channel.SetReportCloseSecureChannelAuditCallback(
-                                new WebSocketReportAuditCloseSecureChannelEventHandler(
-                                    OnReportAuditCloseSecureChannelEvent));
-                            channel.SetReportCertificateAuditCallback(
-                                new WebSocketReportAuditCertificateEventHandler(
-                                    OnReportAuditCertificateEvent));
-                        }
-
-                        uint channelId;
-                        do
-                        {
-                            // get channel id
-                            channelId = GetNextChannelId();
-
-                            // save the channel for shutdown and reconnects.
-                            // retry to get a channel id if it is already in use.
-                        } while (!channels.TryAdd(channelId, channel));
-
-                        // start accepting messages on the channel.
-                        channel.Attach(channelId, webSocket);
-
-                        // Keep reference to the active WebSocket to wait outside the lock
-                        activeWebSocket = webSocket;
-
                         channel = null;
-                    }
-                    catch (Exception ex)
-                    {
-                        m_logger.LogError(ex, "Unexpected error accepting a new connection.");
-                    }
-                    finally
-                    {
-                        Utils.SilentDispose(channel);
+                        try
+                        {
+
+                            channel = new WebSocketServerChannel(
+                                    ListenerId,
+                                    this,
+                                    m_bufferManager,
+                                    m_quotas,
+                                    m_serverCertificateTypesProvider,
+                                    m_descriptions,
+                                    m_telemetry);
+
+                            if (m_callback != null)
+                            {
+                                channel.SetRequestReceivedCallback(
+                                    new WebSocketChannelRequestEventHandler(OnRequestReceivedAsync));
+                                channel.SetReportOpenSecureChannelAuditCallback(
+                                    new WebSocketReportAuditOpenSecureChannelEventHandler(
+                                        OnReportAuditOpenSecureChannelEvent));
+                                channel.SetReportCloseSecureChannelAuditCallback(
+                                    new WebSocketReportAuditCloseSecureChannelEventHandler(
+                                        OnReportAuditCloseSecureChannelEvent));
+                                channel.SetReportCertificateAuditCallback(
+                                    new WebSocketReportAuditCertificateEventHandler(
+                                        OnReportAuditCertificateEvent));
+                            }
+
+                            uint channelId;
+                            do
+                            {
+                                // get channel id
+                                channelId = GetNextChannelId();
+
+                                // save the channel for shutdown and reconnects.
+                                // retry to get a channel id if it is already in use.
+                            } while (!channels.TryAdd(channelId, channel));
+
+                            // start accepting messages on the channel.
+                            channel.Attach(channelId, webSocket);
+
+                            // Keep reference to the active WebSocket to wait outside the lock
+                            activeWebSocket = webSocket;
+
+                            channel = null;
+                        }
+                        catch (Exception ex)
+                        {
+                            m_logger.LogError(ex, "Unexpected error accepting a new connection.");
+                        }
+                        finally
+                        {
+                            Utils.SilentDispose(channel);
+                        }
                     }
                 }
             }
