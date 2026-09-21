@@ -16,6 +16,7 @@ using System.Linq;
 using System.Net;
 using System.Net.WebSockets;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 
@@ -40,6 +41,7 @@ namespace Opc.Ua.Bindings
             m_sink = sink;
             m_bufferManager = bufferManager;
             m_receiveBufferSize = receiveBufferSize;
+            _ = Task.Run(ProcessSendQueueAsync);
         }
         /// <summary>
         /// Creates an unconnected socket.
@@ -56,6 +58,7 @@ namespace Opc.Ua.Bindings
             m_sink = sink;
             m_bufferManager = bufferManager;
             m_receiveBufferSize = receiveBufferSize;
+            _ = Task.Run(ProcessSendQueueAsync);
         }
 
         /// <summary>
@@ -244,6 +247,9 @@ namespace Opc.Ua.Bindings
                     }
                 }
             }
+
+            // let any queued sends drain (marked as socket errors) and the send loop exit.
+            m_sendQueue.Writer.TryComplete();
         }
 
         /// <summary>
@@ -431,16 +437,35 @@ namespace Opc.Ua.Bindings
         /// </summary>
         public bool Send(IMessageSocketAsyncEventArgs args)
         {
-            m_logger.LogDebug("Send called to send WebSocket message");
+            m_logger.LogDebug("Send called to queue WebSocket message");
             if (args == null)
             {
                 throw new ArgumentNullException(nameof(args));
             }
 
-            Task.Run(async () =>
-            {
-                var wsArgs = args as WebSocketMessageSocketAsyncEventArgs;
+            var wsArgs = (WebSocketMessageSocketAsyncEventArgs)args;
 
+            // Queue instead of firing a Task.Run per call: WebSocket.SendAsync forbids
+            // overlapping sends, and concurrent tasks could race and reorder chunks.
+            // A single consumer (ProcessSendQueueAsync) sends strictly in FIFO order.
+            if (!m_sendQueue.Writer.TryWrite(wsArgs))
+            {
+                wsArgs.IsSocketError = true;
+                wsArgs.SocketErrorString = "WebSocket is closed.";
+                wsArgs.OnCompleted();
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Sends queued messages one at a time, in the order <see cref="Send"/> was called.
+        /// </summary>
+        private async Task ProcessSendQueueAsync()
+        {
+            await foreach (WebSocketMessageSocketAsyncEventArgs wsArgs in
+                m_sendQueue.Reader.ReadAllAsync().ConfigureAwait(false))
+            {
                 try
                 {
                     if (m_webSocket?.State == WebSocketState.Open)
@@ -494,9 +519,7 @@ namespace Opc.Ua.Bindings
                 }
 
                 wsArgs.OnCompleted();
-            });
-
-            return true;
+            }
         }
 
         /// <summary>
@@ -516,6 +539,9 @@ namespace Opc.Ua.Bindings
         private readonly object m_socketLock = new object();
         private EndPoint m_localEndpoint;
         private EndPoint m_remoteEndpoint;
+        private readonly Channel<WebSocketMessageSocketAsyncEventArgs> m_sendQueue =
+            Channel.CreateUnbounded<WebSocketMessageSocketAsyncEventArgs>(
+                new UnboundedChannelOptions { SingleReader = true });
 
         private const string kOpcUaBinarySubProtocol = "opcua+uacp";
     }

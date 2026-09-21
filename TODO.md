@@ -109,14 +109,14 @@ not fixed. Verified independently against the SDK's TCP transport.
   is created, instead of just logging and creating the channel anyway. Also dropped the
   hardcoded `bool isBlocked = false` (it never toggled and gated nothing).
 
-- [ ] **2.3 — Chunk ordering can be violated on send**
+- [x] **2.3 — Chunk ordering can be violated on send**
   `src/WebSocketMessageSocket.cs` · `Send`
-  Every call dispatches its own `Task.Run`, so chunks race. Verified — dispatching chunks
-  0…15 in order produced `2,0,3,1,15,4,6,7,9,14,8,10,12,5,11,13`.
-  Harmless for single-chunk messages (likely why opcjs passed), fatal for any message that
-  spans chunks and for sequence-number validation.
-  Fix: serialize sends through a `SemaphoreSlim(1,1)` or a single-consumer send queue.
-  (`WebSocket.SendAsync` also forbids overlapping sends.)
+  Fixed: `Send` no longer spawns a `Task.Run` per call. It enqueues the
+  `WebSocketMessageSocketAsyncEventArgs` onto an unbounded `Channel` (FIFO), and a single
+  background consumer (`ProcessSendQueueAsync`, started once per instance from both
+  constructors) drains it and calls `WebSocket.SendAsync` one item at a time, in the order
+  `Send` was called. `Close()` completes the channel writer so queued items still get
+  `OnCompleted()` (marked as socket errors) and the consumer loop exits.
 
 - [ ] **2.4 — `UpdateChannelLastActiveTime` is a no-op + no inactivity timer**
   `src/WebSocketTransportListener.cs`

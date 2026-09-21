@@ -5,13 +5,13 @@
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>UA.NETStandard.WebSocket</PackageId>
     <Version>1.5.0-alpha.3</Version>
-    <Authors>Iarbre</Authors>
+    <Authors>Alzinar</Authors>
     <Description>
       WebSocket transport implementation for OPC UA .NET Standard.
     </Description>
     <PackageTags>opcua websocket ua dotnet</PackageTags>
     <RepositoryUrl>
-      https://github.com/iarbre/UA-.NETStandard-WebSocket
+      https://github.com/Alzinar/UA-.NETStandard-WebSocket
     </RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
