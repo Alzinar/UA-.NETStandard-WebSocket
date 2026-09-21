@@ -91,16 +91,16 @@ These are confirmed differences against code that interoperates with
 The working server has these too — they are latent (opcjs did not happen to trigger them),
 not fixed. Verified independently against the SDK's TCP transport.
 
-- [ ] **2.1 — Connection loss is never reported to the channel**
+- [x] **2.1 — Connection loss is never reported to the channel**
   `src/WebSocketMessageSocket.cs`
-  `ReadNextMessageAsync`'s catch logs and swallows, so the outer `catch` that calls
-  `OnReceiveError` never runs. Verified on an abrupt disconnect (no close handshake):
-  `ws.State=Aborted, OnReceiveError calls=0` — the read loop just exits.
-  Consequence: `HandleSocketError` / `ForceChannelFault` / `ChannelClosed` never fire, so
-  the channel and its buffers **leak on every ungraceful disconnect** and the listener keeps
-  a dead entry in `m_channels`.
-  Fix: rethrow (or report `OnReceiveError` directly) for non-cancellation exceptions, and
-  report an error when the loop exits with the socket no longer `Open`.
+  Fixed: `ReadNextMessageAsync` no longer swallows exceptions in its `catch` — it returns
+  the rented buffer and rethrows, so the outer loop's `catch` in `ReadNextMessage` (which
+  calls `OnReceiveError`) actually runs. `ReadNextMessageAsync` now returns `bool` (`false`
+  when a close frame was received and already reported) so the loop can distinguish that
+  case from falling through. After the loop exits for any other reason (e.g. the socket
+  goes straight to `Aborted` on an abrupt reset, with no exception and no close frame), and
+  it wasn't an intentional local `Close()`, `ReadNextMessage` now reports a generic
+  `BadConnectionClosed` to the sink instead of exiting silently.
 
 - [ ] **2.2 — `MaxChannelCount` is computed but never enforced**
   `src/WebSocketTransportListener.cs` · `HandleWebSocketConnectionAsync`

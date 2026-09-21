@@ -256,19 +256,38 @@ namespace Opc.Ua.Bindings
             {
                 m_logger.LogInformation("Starting WebSocket read loop");
 
+                bool errorReported = false;
+
                 while (!m_closed && m_webSocket?.State == WebSocketState.Open)
                 {
                     try
                     {
-                        await ReadNextMessageAsync().ConfigureAwait(false);
+                        if (!await ReadNextMessageAsync().ConfigureAwait(false))
+                        {
+                            // a close frame was received and already reported to the sink.
+                            errorReported = true;
+                            break;
+                        }
                     }
                     catch (Exception ex)
                     {
                         m_logger.LogError(ex, "Error reading WebSocket message - Type: {ExceptionType}, Message: {Message}, Stack: {StackTrace}",
                             ex.GetType().Name, ex.Message, ex.StackTrace);
                         m_sink?.OnReceiveError(this, ServiceResult.Create(ex, StatusCodes.BadTcpInternalError, ex.Message));
+                        errorReported = true;
                         break;
                     }
+                }
+
+                // The loop can also end without an exception or a close frame - e.g. an abrupt
+                // reset transitions the WebSocket straight to Aborted. Report that too, unless
+                // this is an intentional local Close().
+                if (!m_closed && !errorReported)
+                {
+                    m_logger.LogInformation("WebSocket connection lost - State: {State}", m_webSocket?.State);
+                    m_sink?.OnReceiveError(this, ServiceResult.Create(
+                        StatusCodes.BadConnectionClosed,
+                        "WebSocket connection was lost."));
                 }
 
                 m_logger.LogInformation("WebSocket read loop ended - Closed: {Closed}, State: {State}", m_closed, m_webSocket?.State);
@@ -278,7 +297,11 @@ namespace Opc.Ua.Bindings
         /// <summary>
         /// Reads the next message from the WebSocket.
         /// </summary>
-        private async Task ReadNextMessageAsync()
+        /// <returns>
+        /// <see langword="false"/> if a close frame was received (already reported to the
+        /// sink) and the read loop should stop; <see langword="true"/> to keep reading.
+        /// </returns>
+        private async Task<bool> ReadNextMessageAsync()
         {
             byte[] buffer = m_bufferManager.TakeBuffer(m_receiveBufferSize, "ReadNextMessageAsync");
 
@@ -302,7 +325,7 @@ namespace Opc.Ua.Bindings
                     m_sink?.OnReceiveError(this, ServiceResult.Create(
                         StatusCodes.BadConnectionClosed,
                         "WebSocket closed by remote endpoint"));
-                    return;
+                    return false;
                 }
 
                 int count = result.Count;
@@ -331,7 +354,7 @@ namespace Opc.Ua.Bindings
                                 m_sink?.OnReceiveError(this, ServiceResult.Create(
                                     StatusCodes.BadConnectionClosed,
                                     "WebSocket closed by remote endpoint"));
-                                return;
+                                return false;
                             }
 
                             stream.Write(continuation, 0, result.Count);
@@ -378,14 +401,17 @@ namespace Opc.Ua.Bindings
                     m_bufferManager.ReturnBuffer(buffer, "ReadNextMessageAsync");
                     buffer = null;
                 }
+
+                return true;
             }
-            catch (Exception ex)
+            catch
             {
-                m_logger.LogError(ex, "Error receiving WebSocket message");
+                // do not swallow: the caller's catch reports the failure to the sink.
                 if (buffer != null)
                 {
                     m_bufferManager.ReturnBuffer(buffer, "ReadNextMessageAsync");
                 }
+                throw;
             }
         }
 
