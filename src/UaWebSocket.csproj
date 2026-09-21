@@ -2,17 +2,35 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageId>UA.NETStandard.WebSocket</PackageId>
+    <Version>1.5.0-alpha.1</Version>
+    <Authors>Iarbre</Authors>
+    <Description>
+      WebSocket transport implementation for OPC UA .NET Standard.
+    </Description>
+    <PackageTags>opcua websocket ua dotnet</PackageTags>
+    <RepositoryUrl>
+      https://github.com/iarbre/UA-.NETStandard-WebSocket
+    </RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>disable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <None Include="../README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Core" Version="1.5.378.176" />
-    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Security.Certificates" Version="1.5.378.176" />
+    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Security.Certificates"
+      Version="1.5.378.176" />
     <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Types" Version="1.5.378.176" />
   </ItemGroup>
 
