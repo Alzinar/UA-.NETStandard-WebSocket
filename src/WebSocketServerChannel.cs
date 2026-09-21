@@ -652,9 +652,10 @@ namespace Opc.Ua.Bindings
                 // get the chunks to process.
                 chunksToProcess = GetSavedChunks(requestId, messageBody, true);
 
+                using var stream = new ArraySegmentStream(chunksToProcess);
                 request = (OpenSecureChannelRequest)
                     BinaryDecoder.DecodeMessage(
-                        new ArraySegmentStream(chunksToProcess),
+                        stream,
                         typeof(OpenSecureChannelRequest),
                         Quotas.MessageContext);
 
@@ -959,8 +960,9 @@ namespace Opc.Ua.Bindings
                 // get the chunks to process.
                 chunksToProcess = GetSavedChunks(requestId, messageBody, true);
 
+                using var stream = new ArraySegmentStream(chunksToProcess);
                 if (BinaryDecoder.DecodeMessage(
-                        new ArraySegmentStream(chunksToProcess),
+                        stream,
                         typeof(CloseSecureChannelRequest),
                         Quotas.MessageContext)
                     is not CloseSecureChannelRequest request)
@@ -1144,8 +1146,9 @@ namespace Opc.Ua.Bindings
                 chunksToProcess = GetSavedChunks(requestId, messageBody, true);
 
                 // decode the request.
+                using var stream = new ArraySegmentStream(chunksToProcess);
                 if (BinaryDecoder.DecodeMessage(
-                        new ArraySegmentStream(chunksToProcess),
+                        stream,
                         null,
                         Quotas.MessageContext)
                     is not IServiceRequest request)
