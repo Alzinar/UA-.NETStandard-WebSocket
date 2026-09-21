@@ -111,7 +111,7 @@ namespace Opc.Ua.Bindings
             m_logger.LogInformation("Opening WebSocket listener on {EndpointUrl}", baseAddress);
             m_bufferManager = new BufferManager(
                 "Server",
-                settings.Configuration.MaxBufferSize, m_telemetry);
+                Math.Max(settings.Configuration.MaxBufferSize, settings.Configuration.MaxMessageSize), m_telemetry);
             m_descriptions = settings.Descriptions;
             m_serverCertificateTypesProvider = settings.ServerCertificateTypesProvider;
 
