@@ -203,27 +203,29 @@ namespace Opc.Ua.Bindings
         {
             WebSocketStartup.Listener = this;
 
-            // opc.wss is the only supported scheme and is always TLS-secured per the OPC UA spec;
-            // fail fast instead of silently falling back to an unencrypted endpoint.
-            bool requireTls = string.Equals(
-                EndpointUrl.Scheme,
-                Utils.UriSchemeOpcWss,
-                StringComparison.OrdinalIgnoreCase);
-
-            X509Certificate2 serverCertificate = null;
-            if (requireTls)
+            // opc.wss is the only scheme this transport supports - the OPC UA spec defines
+            // no unencrypted "opc.ws" counterpart, so reject anything else outright instead
+            // of silently falling back to an unencrypted endpoint.
+            if (!string.Equals(EndpointUrl.Scheme, Utils.UriSchemeOpcWss, StringComparison.OrdinalIgnoreCase))
             {
-                serverCertificate = m_serverCertificateTypesProvider?.GetInstanceCertificate(
-                    SecurityPolicies.Basic256Sha256);
+                throw new ServiceResultException(
+                    StatusCodes.BadConfigurationError,
+                    Utils.Format(
+                        "The WebSocket transport only supports the '{0}' scheme; endpoint {1} was requested.",
+                        Utils.UriSchemeOpcWss,
+                        EndpointUrl));
+            }
 
-                if (serverCertificate == null)
-                {
-                    throw new ServiceResultException(
-                        StatusCodes.BadConfigurationError,
-                        Utils.Format(
-                            "No server certificate is configured for the TLS-secured WebSocket endpoint {0}.",
-                            EndpointUrl));
-                }
+            X509Certificate2 serverCertificate = m_serverCertificateTypesProvider?.GetInstanceCertificate(
+                SecurityPolicies.Basic256Sha256);
+
+            if (serverCertificate == null)
+            {
+                throw new ServiceResultException(
+                    StatusCodes.BadConfigurationError,
+                    Utils.Format(
+                        "No server certificate is configured for the TLS-secured WebSocket endpoint {0}.",
+                        EndpointUrl));
             }
 
             UriHostNameType hostType = Uri.CheckHostName(EndpointUrl.Host);
@@ -238,16 +240,13 @@ namespace Opc.Ua.Bindings
                     {
                         void ConfigureListenOptions(ListenOptions listenOptions)
                         {
-                            if (requireTls)
+                            listenOptions.UseHttps(serverCertificate, httpsOptions =>
                             {
-                                listenOptions.UseHttps(serverCertificate, httpsOptions =>
-                                {
-                                    // request (not require) a TLS client certificate and check it
-                                    // against the configured OPC UA certificate trust list.
-                                    httpsOptions.ClientCertificateMode = ClientCertificateMode.AllowCertificate;
-                                    httpsOptions.ClientCertificateValidation = ValidateClientCertificate;
-                                });
-                            }
+                                // request (not require) a TLS client certificate and check it
+                                // against the configured OPC UA certificate trust list.
+                                httpsOptions.ClientCertificateMode = ClientCertificateMode.AllowCertificate;
+                                httpsOptions.ClientCertificateValidation = ValidateClientCertificate;
+                            });
                         }
 
                         if (ipAddress == null)
@@ -275,10 +274,7 @@ namespace Opc.Ua.Bindings
                 TimeSpan.FromMilliseconds(m_inactivityDetectPeriod),
                 TimeSpan.FromMilliseconds(m_inactivityDetectPeriod));
 
-            m_logger.LogInformation(
-                "WebSocket listener started on {EndpointUrl} (TLS: {RequireTls})",
-                EndpointUrl,
-                requireTls);
+            m_logger.LogInformation("WebSocket listener started on {EndpointUrl}", EndpointUrl);
         }
 
         /// <summary>
