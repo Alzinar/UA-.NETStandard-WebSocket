@@ -687,14 +687,37 @@ namespace Opc.Ua.Bindings
         }
 
         /// <inheritdoc/>
-        public bool ReconnectToExistingChannel(IMessageSocket socket, uint requestId, uint sequenceNumber, uint channelId,
-        X509Certificate2 clientCertificate, ChannelToken token, OpenSecureChannelRequest request)
+        public bool ReconnectToExistingChannel(
+            IMessageSocket socket,
+            uint requestId,
+            uint sequenceNumber,
+            uint channelId,
+            X509Certificate2 clientCertificate,
+            ChannelToken token,
+            OpenSecureChannelRequest request)
         {
-            throw new NotImplementedException();
+            if (m_channels?.TryGetValue(channelId, out WebSocketListenerChannel channel) != true)
+            {
+                throw ServiceResultException.Create(
+                    StatusCodes.BadTcpSecureChannelUnknown,
+                    "Could not find secure channel referenced in the OpenSecureChannel request.");
+            }
+
+            channel.Reconnect(socket, requestId, sequenceNumber, clientCertificate, token, request);
+
+            m_logger.LogInformation("ChannelId {Id}: reconnected.", channelId);
+            return true;
         }
 
         /// <inheritdoc/>
-        public async Task<bool> TransferListenerChannel(uint channelId, string serverUri, Uri endpointUrl)
+        [Obsolete("Use TransferListenerChannelAsync instead.")]
+        public Task<bool> TransferListenerChannel(uint channelId, string serverUri, Uri endpointUrl)
+        {
+            return TransferListenerChannelAsync(channelId, serverUri, endpointUrl);
+        }
+
+        /// <inheritdoc/>
+        public async Task<bool> TransferListenerChannelAsync(uint channelId, string serverUri, Uri endpointUrl)
         {
             bool accepted = false;
 
@@ -724,12 +747,6 @@ namespace Opc.Ua.Bindings
             }
 
             return accepted;
-        }
-
-        /// <inheritdoc/>
-        public Task<bool> TransferListenerChannelAsync(uint channelId, string serverUri, Uri endpointUrl)
-        {
-            throw new NotImplementedException();
         }
 
         /// <inheritdoc/>

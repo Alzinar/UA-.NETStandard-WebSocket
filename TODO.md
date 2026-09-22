@@ -231,11 +231,21 @@ Recorded so they are not lost; the reference does not implement these either.
   the OPC UA `ICertificateValidator` isn't wireable here: `IMessageSocketFactory.Create(sink,
   bufferManager, receiveBufferSize)` and `IMessageSink` don't expose it, so the socket layer
   has no access to `Quotas.CertificateValidator`.
-- [ ] **4.4 — Implement reconnect paths**
+- [x] **4.4 — Implement reconnect paths**
   `WebSocketListenerChannel.Reconnect`, `ReconnectToExistingChannel` and
   `TransferListenerChannelAsync` all throw. `WebSocketServerChannel` already contains the
   full queued-response reconnect logic (faithful port of `TcpServerChannel`) — it is just
   unreachable. Depends on 2.1.
+  Fixed: `WebSocketTransportListener.ReconnectToExistingChannel` now looks up the channel by
+  id in `m_channels` and calls `channel.Reconnect(...)`, so `WebSocketServerChannel`'s
+  existing override (which was previously dead code, since nothing called it) is reachable;
+  `WebSocketListenerChannel.Reconnect`'s base `NotImplementedException` remains only as the
+  template-method default for a hypothetical subclass that doesn't override it, matching the
+  SDK's `TcpListenerChannel` pattern. Also swapped the real/stub split on the transfer-channel
+  pair to match `ITcpChannelListener`'s `[Obsolete("Use TransferListenerChannelAsync
+  instead.")]` contract: `TransferListenerChannelAsync` now holds the real logic (moved
+  verbatim from the old `TransferListenerChannel`), and `TransferListenerChannel` just
+  forwards to it.
 - [ ] **4.5 — Enforce message-size quotas on receive**
   The SDK validates `TcpMessageType.IsValid` and rejects
   `messageSize > receiveBufferSize` before reading the body. We never inspect the header,
