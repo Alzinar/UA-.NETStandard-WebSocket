@@ -33,7 +33,13 @@ namespace Opc.Ua.Bindings
         /// <summary>
         /// Raised when a monitored connection's status changed.
         /// </summary>
+        /// <remarks>
+        /// Required by <see cref="ITransportListener"/>; unraised until reverse connect
+        /// (TODO 4.4) is implemented for the WebSocket transport.
+        /// </remarks>
+#pragma warning disable CS0067
         public event EventHandler<ConnectionStatusEventArgs> ConnectionStatusChanged;
+#pragma warning restore CS0067
 
         private readonly ILogger m_logger;
         private readonly ITelemetryContext m_telemetry;
@@ -342,14 +348,7 @@ namespace Opc.Ua.Bindings
         /// <inheritdoc/>
         public void CreateReverseConnection(Uri url, int timeout)
         {
-            ConnectionWaiting = null;
-            ConnectionStatusChanged = null;
             m_logger.LogInformation("Creating reverse connection to {Url} with timeout {Timeout}", url, timeout);
-            // Suppress warnings
-            ConnectionWaiting = null;
-            ConnectionWaiting?.Invoke(null, null);
-            ConnectionStatusChanged = null;
-            ConnectionStatusChanged?.Invoke(null, null);
             throw new NotImplementedException("Reverse connect not implemented for WebSocket transport.");
         }
 

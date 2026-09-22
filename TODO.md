@@ -196,11 +196,14 @@ not fixed. Verified independently against the SDK's TCP transport.
   handshake against the expected certificate is left for the opcjs smoke test in 1.7 rather
   than new unit-test infrastructure here.)
 
-- [ ] **3.4 — Replace the `CreateReverseConnection` dead code**
+- [x] **3.4 — Replace the `CreateReverseConnection` dead code**
   `src/WebSocketTransportListener.cs`
-  It assigns the events to `null` and invokes them "to suppress warnings" before throwing.
-  Fix: delete the dead statements; keep `throw new NotImplementedException(...)` until
-  reverse connect is actually implemented.
+  Fixed: removed the `= null` assignments and the `?.Invoke(null, null)` calls that existed
+  only "to suppress warnings"; `CreateReverseConnection` now just logs and throws
+  `NotImplementedException`. Removing that dead code left `ConnectionStatusChanged` with no
+  raise site, triggering CS0067 (it's mandated by `ITransportListener`, not something we can
+  delete) — suppressed with a comment noting it stays silent until reverse connect (4.4) is
+  implemented.
 
 ---
 
