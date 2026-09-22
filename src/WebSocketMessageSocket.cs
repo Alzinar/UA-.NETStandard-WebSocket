@@ -350,6 +350,11 @@ namespace Opc.Ua.Bindings
 
                 int count = result.Count;
 
+                // Defence in depth: the SDK's TCP transport validates the message type and
+                // declared size against the receive buffer before reading the body; do the
+                // same here instead of trusting whatever the peer sends.
+                int declaredMessageSize = ValidateMessageHeader(buffer, count);
+
                 if (!result.EndOfMessage)
                 {
                     // Slow path: the message is fragmented across frames - reassemble before delivering it.
@@ -377,6 +382,14 @@ namespace Opc.Ua.Bindings
                                 return false;
                             }
 
+                            if (stream.Length + result.Count > declaredMessageSize)
+                            {
+                                throw ServiceResultException.Create(
+                                    StatusCodes.BadTcpMessageTooLarge,
+                                    "Reassembled WebSocket message exceeds its declared size of {0} bytes.",
+                                    declaredMessageSize);
+                            }
+
                             stream.Write(continuation, 0, result.Count);
                         }
                         finally
@@ -390,6 +403,15 @@ namespace Opc.Ua.Bindings
                     Buffer.BlockCopy(stream.GetBuffer(), 0, buffer, 0, count);
 
                     m_logger.LogDebug("Reassembled fragmented WebSocket message into {MessageSize} bytes", count);
+                }
+
+                if (count != declaredMessageSize)
+                {
+                    throw ServiceResultException.Create(
+                        StatusCodes.BadTcpMessageTypeInvalid,
+                        "Message size {0} bytes does not match the declared size of {1} bytes.",
+                        count,
+                        declaredMessageSize);
                 }
 
                 if (count > 0)
@@ -436,7 +458,45 @@ namespace Opc.Ua.Bindings
         }
 
         /// <summary>
-        /// Changes the sink used to report reads.
+        /// Validates the UA chunk header (message type + declared size) the same way the
+        /// TCP transport does before reading the message body, and returns the declared size.
+        /// </summary>
+        /// <exception cref="ServiceResultException"></exception>
+        private int ValidateMessageHeader(byte[] buffer, int count)
+        {
+            if (count < TcpMessageLimits.MessageTypeAndSize)
+            {
+                throw ServiceResultException.Create(
+                    StatusCodes.BadTcpMessageTypeInvalid,
+                    "Message is too short ({0} bytes) to contain a valid header.",
+                    count);
+            }
+
+            uint messageType = BitConverter.ToUInt32(buffer, 0);
+            if (!TcpMessageType.IsValid(messageType))
+            {
+                throw ServiceResultException.Create(
+                    StatusCodes.BadTcpMessageTypeInvalid,
+                    "Message type 0x{0:X8} is invalid.",
+                    messageType);
+            }
+
+            int messageSize = BitConverter.ToInt32(buffer, 4);
+            int maxMessageSize = m_bufferManager.MaxSuggestedBufferSize;
+            if (messageSize <= TcpMessageLimits.MessageTypeAndSize || messageSize > maxMessageSize)
+            {
+                throw ServiceResultException.Create(
+                    StatusCodes.BadTcpMessageTooLarge,
+                    "Message size {0} bytes is invalid (max {1}).",
+                    messageSize,
+                    maxMessageSize);
+            }
+
+            return messageSize;
+        }
+
+        /// <summary>
+        /// /// Changes the sink used to report reads.
         /// </summary>
         public void ChangeSink(IMessageSink sink)
         {
