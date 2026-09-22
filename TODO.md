@@ -137,12 +137,15 @@ not fixed. Verified independently against the SDK's TCP transport.
   `EndpointBase.CreateFault` and sends it back on the channel (itself guarded by a nested
   try/catch, since the channel may already be gone).
 
-- [ ] **2.6 — Replace the per-connection 100 ms polling keep-alive**
+- [x] **2.6 — Replace the per-connection 100 ms polling keep-alive**
   `src/WebSocketTransportListener.cs` · `HandleWebSocketConnectionAsync`
-  `while (State == Open) await Task.Delay(100);` pins an ASP.NET request per connection and
-  adds up to 100 ms to close detection. It also never exits if the peer parks in
-  `CloseReceived`.
-  Fix: signal a `TaskCompletionSource` when the channel closes and await that instead.
+  Fixed: `WebSocketListenerChannel` now exposes a `Closed` task backed by a
+  `TaskCompletionSource`, completed from `ChannelClosed()`, `ChannelFaulted()` and
+  `Dispose(bool)` — the three terminal transitions (graceful close, fault, and direct
+  disposal e.g. on listener shutdown). `HandleWebSocketConnectionAsync` captures
+  `channel.Closed` right after `Attach` and awaits that instead of
+  `while (State == Open) await Task.Delay(100);`, so it reacts immediately to the channel
+  closing (including the `CloseReceived` case) instead of polling.
 
 - [ ] **2.7 — `Close()` blocks on `.Wait(1000)` inside a lock**
   `src/WebSocketMessageSocket.cs` · `Close`

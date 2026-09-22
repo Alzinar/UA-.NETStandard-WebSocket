@@ -2,6 +2,7 @@ using System;
 using System.Net;
 using System.Net.WebSockets;
 using System.Security.Cryptography.X509Certificates;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Opc.Ua.Security.Certificates;
 
@@ -36,7 +37,9 @@ namespace Opc.Ua.Bindings
         private readonly ILogger m_logger;
         private bool m_responseRequired;
         private uint m_lastTokenId;
-        
+        private readonly TaskCompletionSource<bool> m_closedTcs =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public WebSocketListenerChannel(
             string contextId,
             ITcpChannelListener listener,
@@ -64,8 +67,18 @@ namespace Opc.Ua.Bindings
         /// </summary>
         protected override void Dispose(bool disposing)
         {
+            if (disposing)
+            {
+                m_closedTcs.TrySetResult(true);
+            }
             base.Dispose(disposing);
         }
+
+        /// <summary>
+        /// Completes once the channel has closed or faulted, so callers can await it
+        /// instead of polling the underlying socket state.
+        /// </summary>
+        public Task Closed => m_closedTcs.Task;
 
         /// <summary>
         /// The channel name used in trace output.
@@ -355,6 +368,7 @@ namespace Opc.Ua.Bindings
             {
                 State = TcpChannelState.Closed;
                 Listener.ChannelClosed(ChannelId);
+                m_closedTcs.TrySetResult(true);
 
                 // notify any monitors.
                 NotifyMonitors(new ServiceResult(StatusCodes.BadConnectionClosed), true);
@@ -375,6 +389,7 @@ namespace Opc.Ua.Bindings
             {
                 State = TcpChannelState.Faulted;
                 Listener.ChannelClosed(ChannelId);
+                m_closedTcs.TrySetResult(true);
             }
         }
 

@@ -388,6 +388,7 @@ namespace Opc.Ua.Bindings
 
             WebSocketListenerChannel channel = null;
             System.Net.WebSockets.WebSocket activeWebSocket = null;
+            Task channelClosedTask = null;
 
             lock (m_lock)
             {
@@ -488,6 +489,7 @@ namespace Opc.Ua.Bindings
 
                             // Keep reference to the active WebSocket to wait outside the lock
                             activeWebSocket = webSocket;
+                            channelClosedTask = channel.Closed;
 
                             channel = null;
                         }
@@ -503,12 +505,13 @@ namespace Opc.Ua.Bindings
                 }
             }
 
-            // Keep the HTTP context alive while the WebSocket is open (outside the lock)
+            // Keep the HTTP context alive while the WebSocket is open (outside the lock).
+            // Await the channel's closed signal instead of polling the socket state.
             if (activeWebSocket != null)
             {
-                while (activeWebSocket.State == System.Net.WebSockets.WebSocketState.Open)
+                if (channelClosedTask != null)
                 {
-                    await Task.Delay(100).ConfigureAwait(false);
+                    await channelClosedTask.ConfigureAwait(false);
                 }
 
                 m_logger.LogInformation("WebSocket connection closed, State: {State}", activeWebSocket.State);
