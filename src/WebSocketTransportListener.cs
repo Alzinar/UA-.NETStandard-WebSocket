@@ -222,15 +222,14 @@ namespace Opc.Ua.Bindings
                         EndpointUrl));
             }
 
-            X509Certificate2 serverCertificate = m_serverCertificateTypesProvider?.GetInstanceCertificate(
-                SecurityPolicies.Basic256Sha256);
+            X509Certificate2 serverCertificate = GetTlsServerCertificate();
 
             if (serverCertificate == null)
             {
                 throw new ServiceResultException(
                     StatusCodes.BadConfigurationError,
                     Utils.Format(
-                        "No server certificate is configured for the TLS-secured WebSocket endpoint {0}.",
+                        "No server certificate is configured for any of the security policies on the WebSocket endpoint {0}.",
                         EndpointUrl));
             }
 
@@ -281,6 +280,37 @@ namespace Opc.Ua.Bindings
                 TimeSpan.FromMilliseconds(m_inactivityDetectPeriod));
 
             m_logger.LogInformation("WebSocket listener started on {EndpointUrl}", EndpointUrl);
+        }
+
+        /// <summary>
+        /// Resolves the certificate to present for the TLS handshake from the security
+        /// policies actually configured on this listener's endpoints (preferring one that
+        /// requires a certificate over "None"), instead of assuming <c>Basic256Sha256</c>.
+        /// </summary>
+        private X509Certificate2 GetTlsServerCertificate()
+        {
+            if (m_serverCertificateTypesProvider == null || m_descriptions == null)
+            {
+                return null;
+            }
+
+            IEnumerable<string> policyUris = m_descriptions
+                .Select(d => d.SecurityPolicyUri)
+                .Where(uri => !string.IsNullOrEmpty(uri))
+                .Distinct()
+                .OrderBy(uri => uri == SecurityPolicies.None ? 1 : 0);
+
+            foreach (string securityPolicyUri in policyUris)
+            {
+                X509Certificate2 certificate = m_serverCertificateTypesProvider.GetInstanceCertificate(
+                    securityPolicyUri);
+                if (certificate != null)
+                {
+                    return certificate;
+                }
+            }
+
+            return null;
         }
 
         /// <summary>

@@ -180,10 +180,16 @@ not fixed. Verified independently against the SDK's TCP transport.
   resolved, instead of silently binding plain HTTP. Also wired TLS client-certificate
   validation into Kestrel via the existing `m_quotas.CertificateValidator`.
 
-- [ ] **3.2 — Do not hardcode `Basic256Sha256` for the TLS certificate**
+- [x] **3.2 — Do not hardcode `Basic256Sha256` for the TLS certificate**
   `src/WebSocketTransportListener.cs` · `Start`
-  Derive the certificate from the configured endpoints / security policies; today an
-  ECC-only or RsaPss-only server gets the wrong certificate or none.
+  Fixed: added `GetTlsServerCertificate()`, which reads the distinct `SecurityPolicyUri`s
+  actually configured on this listener's `m_descriptions` (populated per-endpoint by
+  `WebSocketServiceHost.CreateServiceHost` from the app's configured security policies, not
+  hardcoded), tries each with `GetInstanceCertificate` (preferring one that requires a
+  certificate over `SecurityPolicies.None`, tried last as a fallback), and returns the first
+  certificate found. An ECC-only or RsaPss-only server (or one that never configured
+  `Basic256Sha256` at all) now gets its actual certificate for the TLS handshake instead of
+  unconditionally failing to resolve one.
 
 - [x] **3.3 — Verify TLS-layer behaviour explicitly**
   `src/WebSocketTransportListener.cs` · `Start`
