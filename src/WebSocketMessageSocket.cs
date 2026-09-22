@@ -219,37 +219,51 @@ namespace Opc.Ua.Bindings
         public void Close()
         {
             m_logger.LogInformation("Closing WebSocketMessageSocket");
+
+            WebSocket webSocket;
             lock (m_socketLock)
             {
                 m_closed = true;
-
-                if (m_webSocket != null)
-                {
-                    try
-                    {
-                        if (m_webSocket.State == WebSocketState.Open)
-                        {
-                            m_webSocket.CloseAsync(
-                                WebSocketCloseStatus.NormalClosure,
-                                "Closing",
-                                CancellationToken.None).Wait(1000);
-                        }
-                    }
-                    catch (Exception e)
-                    {
-                        m_logger.LogError(e, "Unexpected error closing WebSocket.");
-                    }
-                    finally
-                    {
-                        m_logger.LogInformation("Disposing WebSocket and setting it to null.");
-                        m_webSocket.Dispose();
-                        m_webSocket = null;
-                    }
-                }
+                webSocket = m_webSocket;
+                m_webSocket = null;
             }
 
             // let any queued sends drain (marked as socket errors) and the send loop exit.
             m_sendQueue.Writer.TryComplete();
+
+            if (webSocket != null)
+            {
+                // Fire-and-forget the close handshake so callers of Close() (which may be
+                // holding other locks) never block on network I/O.
+                _ = CloseWebSocketAsync(webSocket);
+            }
+        }
+
+        /// <summary>
+        /// Attempts a graceful close handshake, then always disposes the socket.
+        /// </summary>
+        private async Task CloseWebSocketAsync(WebSocket webSocket)
+        {
+            try
+            {
+                if (webSocket.State == WebSocketState.Open)
+                {
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+                    await webSocket.CloseAsync(
+                        WebSocketCloseStatus.NormalClosure,
+                        "Closing",
+                        cts.Token).ConfigureAwait(false);
+                }
+            }
+            catch (Exception e)
+            {
+                m_logger.LogError(e, "Unexpected error closing WebSocket.");
+            }
+            finally
+            {
+                m_logger.LogInformation("Disposing WebSocket.");
+                webSocket.Dispose();
+            }
         }
 
         /// <summary>

@@ -147,10 +147,13 @@ not fixed. Verified independently against the SDK's TCP transport.
   `while (State == Open) await Task.Delay(100);`, so it reacts immediately to the channel
   closing (including the `CloseReceived` case) instead of polling.
 
-- [ ] **2.7 — `Close()` blocks on `.Wait(1000)` inside a lock**
+- [x] **2.7 — `Close()` blocks on `.Wait(1000)` inside a lock**
   `src/WebSocketMessageSocket.cs` · `Close`
-  Sync-over-async while holding `m_socketLock`; risks stalls and thread-pool starvation.
-  Fix: fire-and-forget the close handshake (or expose an async close) and dispose the socket.
+  Fixed: `Close()` now only takes `m_socketLock` to flip `m_closed` and grab/null the
+  `WebSocket` reference, then releases it before doing anything else — no I/O happens while
+  the lock is held. The close handshake (`CloseAsync` with a 1s timeout) and the socket's
+  `Dispose()` are moved to a fire-and-forget `CloseWebSocketAsync` task, so `Close()` (and
+  any caller holding a channel-level lock around it) never blocks on network I/O.
 
 - [ ] **2.8 — `Thread.Sleep(1000)` in the `ChannelFull` back-pressure loop**
   `src/WebSocketServerChannel.cs` · `ProcessRequestMessage`
