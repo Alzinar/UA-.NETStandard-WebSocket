@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -45,6 +46,8 @@ namespace Opc.Ua.Bindings
         private uint m_lastChannelId;
         private readonly object m_lock = new object();
         private EndpointDescriptionCollection m_descriptions;
+        private Timer m_inactivityDetectionTimer;
+        private int m_inactivityDetectPeriod;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="WebSocketTransportListener"/> class.
@@ -90,6 +93,9 @@ namespace Opc.Ua.Bindings
             {
                 lock (m_lock)
                 {
+                    m_inactivityDetectionTimer?.Dispose();
+                    m_inactivityDetectionTimer = null;
+
                     m_host?.Dispose();
                     m_host = null;
 
@@ -139,6 +145,7 @@ namespace Opc.Ua.Bindings
                 SecurityTokenLifetime = configuration.SecurityTokenLifetime,
                 CertificateValidator = settings.CertificateValidator
             };
+            m_inactivityDetectPeriod = configuration.ChannelLifetime / 2;
             MaxChannelCount = settings.MaxChannelCount;
 
             // save the callback to the server.
@@ -262,10 +269,46 @@ namespace Opc.Ua.Bindings
             m_host = hostBuilder.Build();
             m_host.Start();
 
+            m_inactivityDetectionTimer = new Timer(
+                DetectInactiveChannels,
+                null,
+                TimeSpan.FromMilliseconds(m_inactivityDetectPeriod),
+                TimeSpan.FromMilliseconds(m_inactivityDetectPeriod));
+
             m_logger.LogInformation(
                 "WebSocket listener started on {EndpointUrl} (TLS: {RequireTls})",
                 EndpointUrl,
                 requireTls);
+        }
+
+        /// <summary>
+        /// The inactive timer callback which detects stale channels and closes them.
+        /// </summary>
+        private void DetectInactiveChannels(object state)
+        {
+            ConcurrentDictionary<uint, WebSocketListenerChannel> activeChannels = m_channels;
+            if (activeChannels == null)
+            {
+                return;
+            }
+
+            var staleChannels = new List<WebSocketListenerChannel>();
+            foreach (KeyValuePair<uint, WebSocketListenerChannel> chEntry in activeChannels)
+            {
+                if (chEntry.Value.ElapsedSinceLastActiveTime > m_quotas.ChannelLifetime)
+                {
+                    staleChannels.Add(chEntry.Value);
+                }
+            }
+
+            if (staleChannels.Count != 0)
+            {
+                m_logger.LogInformation("Closing {Count} channel(s) due to inactivity.", staleChannels.Count);
+                foreach (WebSocketListenerChannel channel in staleChannels)
+                {
+                    channel.IdleCleanup();
+                }
+            }
         }
 
         /// <summary>
@@ -317,8 +360,23 @@ namespace Opc.Ua.Bindings
         /// <inheritdoc/>
         public void UpdateChannelLastActiveTime(string globalChannelId)
         {
-            m_logger.LogDebug("Updating last active time for channel {GlobalChannelId}", globalChannelId);
-            // intentionally not implemented
+            try
+            {
+                string channelIdString = globalChannelId[(ListenerId.Length + 1)..];
+                uint channelId = Convert.ToUInt32(channelIdString, CultureInfo.InvariantCulture);
+
+                if (channelId > 0 &&
+                    m_channels != null &&
+                    m_channels.TryGetValue(channelId, out WebSocketListenerChannel channel))
+                {
+                    channel.UpdateLastActiveTime();
+                }
+            }
+            catch (Exception ex)
+            {
+                // ignore errors for calls with invalid channel id
+                m_logger.LogDebug(ex, "Ignoring invalid GlobalChannelId {GlobalChannelId}", globalChannelId);
+            }
         }
 
         /// <summary>

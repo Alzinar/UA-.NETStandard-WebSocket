@@ -118,15 +118,15 @@ not fixed. Verified independently against the SDK's TCP transport.
   `Send` was called. `Close()` completes the channel writer so queued items still get
   `OnCompleted()` (marked as socket errors) and the consumer loop exits.
 
-- [ ] **2.4 — `UpdateChannelLastActiveTime` is a no-op + no inactivity timer**
+- [x] **2.4 — `UpdateChannelLastActiveTime` is a no-op + no inactivity timer**
   `src/WebSocketTransportListener.cs`
-  The SDK resolves the channel from `globalChannelId` and calls `UpdateLastActiveTime()`, and
-  runs a `DetectInactiveChannels` timer against `Quotas.ChannelLifetime`.
-  We do neither, so `ChannelLifetime` is unenforced and stale channels are never reaped
-  (spec Part 6 requires channel lifetime enforcement). `ElapsedSinceLastActiveTime` already
-  exists on `WebSocketListenerChannel` and is used by the `MaxChannelCount` eviction path,
-  so that eviction is currently driven by stale data.
-  Fix: implement the lookup, and add the periodic cleanup timer.
+  Fixed: `UpdateChannelLastActiveTime` now parses the channel id out of `globalChannelId`
+  (`{ListenerId}-{ChannelId}`, same convention as the SDK) and calls `UpdateLastActiveTime()`
+  on the resolved channel. Added a `System.Threading.Timer` (`m_inactivityDetectPeriod =
+  ChannelLifetime / 2`, started in `Start()`, disposed in `Dispose(bool)`) that runs
+  `DetectInactiveChannels`, mirroring the SDK's `TcpTransportListener`: it scans `m_channels`
+  for `ElapsedSinceLastActiveTime > Quotas.ChannelLifetime` and calls `IdleCleanup()` on each
+  stale channel.
 
 - [ ] **2.5 — `OnRequestReceivedAsync` is `async void`**
   `src/WebSocketTransportListener.cs`
