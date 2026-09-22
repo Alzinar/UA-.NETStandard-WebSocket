@@ -155,10 +155,19 @@ not fixed. Verified independently against the SDK's TCP transport.
   `Dispose()` are moved to a fire-and-forget `CloseWebSocketAsync` task, so `Close()` (and
   any caller holding a channel-level lock around it) never blocks on network I/O.
 
-- [ ] **2.8 — `Thread.Sleep(1000)` in the `ChannelFull` back-pressure loop**
+- [x] **2.8 — `Thread.Sleep(1000)` in the `ChannelFull` back-pressure loop**
   `src/WebSocketServerChannel.cs` · `ProcessRequestMessage`
-  Inherited from the TCP port, but on the WebSocket path this blocks a thread-pool thread.
-  Fix: revisit once 2.6 lands; prefer async delay.
+  Confirmed worse than described: `HandleIncomingMessage` calls `ProcessRequestMessage` while
+  holding `lock (DataLock)`, so the blocking `Thread.Sleep(1000)` loop (up to 5s) both tied up
+  a thread-pool thread (this runs on the `Task.Run` read loop from `WebSocketMessageSocket`,
+  unlike the original TCP transport's IOCP callback thread) and froze every other operation on
+  the channel for its duration. Fixed: split `ProcessRequestMessage` into the (still
+  lock-protected) security validation, and `ProcessRequestMessageWhenNotFull` /
+  `ProcessValidatedRequestMessage`. When `ChannelFull`, instead of sleeping it schedules a
+  `Task.Delay(1000)` continuation that re-checks and re-acquires `DataLock` only when it runs,
+  and returns `true` (ownership of the message buffer retained for the deferred retry)
+  immediately — no thread is blocked and the channel lock is not held across the delay.
+  Gives up (same as before, `ChannelClosed()`) after 5 retries.
 
 ---
 

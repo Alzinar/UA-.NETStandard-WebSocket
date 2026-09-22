@@ -1005,6 +1005,11 @@ namespace Opc.Ua.Bindings
         }
 
         /// <summary>
+        /// Number of one-second back-pressure retries before giving up on a full channel.
+        /// </summary>
+        private const int kChannelFullRetries = 5;
+
+        /// <summary>
         /// Processes a request message.
         /// </summary>
         /// <exception cref="ServiceResultException"></exception>
@@ -1062,22 +1067,69 @@ namespace Opc.Ua.Bindings
                 return false;
             }
 
-            int countForDisconnect = 5;
-            while (ChannelFull && countForDisconnect > 0)
+            return ProcessRequestMessageWhenNotFull(
+                messageType,
+                token,
+                requestId,
+                messageBody,
+                kChannelFullRetries);
+        }
+
+        /// <summary>
+        /// Waits out channel back-pressure (<see cref="ChannelFull"/>) before processing a
+        /// validated request. Retries via <see cref="Task.Delay(int)"/> instead of
+        /// <c>Thread.Sleep</c>, so a full channel does not tie up a thread-pool thread (and,
+        /// since the initial call runs under <c>DataLock</c> held by the caller, does not
+        /// freeze the channel) for the duration of the back-pressure delay.
+        /// </summary>
+        private bool ProcessRequestMessageWhenNotFull(
+            uint messageType,
+            ChannelToken token,
+            uint requestId,
+            ArraySegment<byte> messageBody,
+            int retriesRemaining)
+        {
+            if (!ChannelFull)
             {
-                m_logger.LogInformation("Channel {Id}: full -- delay processing.", Id);
-
-                // delay reading from channel
-                Thread.Sleep(1000);
-
-                if (--countForDisconnect == 0 && ChannelFull)
-                {
-                    m_logger.LogWarning("Channel {Id}: break socket connection.", Id);
-                    ChannelClosed();
-                    return false;
-                }
+                return ProcessValidatedRequestMessage(messageType, token, requestId, messageBody);
             }
 
+            if (retriesRemaining <= 0)
+            {
+                m_logger.LogWarning("Channel {Id}: break socket connection.", Id);
+                ChannelClosed();
+                return false;
+            }
+
+            m_logger.LogInformation("Channel {Id}: full -- delay processing.", Id);
+            _ = Task.Delay(1000).ContinueWith(
+                _ =>
+                {
+                    lock (DataLock)
+                    {
+                        ProcessRequestMessageWhenNotFull(
+                            messageType,
+                            token,
+                            requestId,
+                            messageBody,
+                            retriesRemaining - 1);
+                    }
+                },
+                TaskScheduler.Default);
+
+            // ownership of messageBody's buffer is retained for the deferred retry.
+            return true;
+        }
+
+        /// <summary>
+        /// Processes a request message once the channel has spare capacity.
+        /// </summary>
+        private bool ProcessValidatedRequestMessage(
+            uint messageType,
+            ChannelToken token,
+            uint requestId,
+            ArraySegment<byte> messageBody)
+        {
             BufferCollection chunksToProcess = null;
 
             try
