@@ -128,10 +128,14 @@ not fixed. Verified independently against the SDK's TCP transport.
   for `ElapsedSinceLastActiveTime > Quotas.ChannelLifetime` and calls `IdleCleanup()` on each
   stale channel.
 
-- [ ] **2.5 — `OnRequestReceivedAsync` is `async void`**
+- [x] **2.5 — `OnRequestReceivedAsync` is `async void`**
   `src/WebSocketTransportListener.cs`
-  An exception escaping the handler crashes the process instead of faulting the channel.
-  Fix: return `Task` and observe it, or wrap the whole body defensively.
+  The whole body was already wrapped in `try/catch (Exception)`, so nothing could escape
+  the `async void` method and crash the process — but on failure it only logged, leaving
+  the client hanging with no response for that request. Fixed to match the reference
+  `TcpTransportListener`: the catch now also builds a `ServiceFault` via
+  `EndpointBase.CreateFault` and sends it back on the channel (itself guarded by a nested
+  try/catch, since the channel may already be gone).
 
 - [ ] **2.6 — Replace the per-connection 100 ms polling keep-alive**
   `src/WebSocketTransportListener.cs` · `HandleWebSocketConnectionAsync`

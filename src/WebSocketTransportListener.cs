@@ -420,11 +420,11 @@ namespace Opc.Ua.Bindings
                                         : max);
 
                             m_logger.LogInformation(
-                                "TCPLISTENER: Channel Id {Id} scheduled for IdleCleanup - Oldest without established session.",
+                                "WSLISTENER: Channel Id {Id} scheduled for IdleCleanup - Oldest without established session.",
                                 oldestIdChannel.Value.Id);
                             oldestIdChannel.Value.IdleCleanup();
                             m_logger.LogInformation(
-                                "TCPLISTENER: Channel Id {Id} finished IdleCleanup - Oldest without established session.",
+                                "WSLISTENER: Channel Id {Id} finished IdleCleanup - Oldest without established session.",
                                 oldestIdChannel.Value.Id);
 
                             channelCount--;
@@ -565,7 +565,21 @@ namespace Opc.Ua.Bindings
             }
             catch (Exception e)
             {
-                m_logger.LogError(e, "TCPLISTENER - Unexpected error processing request.");
+                // Caught here (rather than left to escape this async void method) so a
+                // failure can't take down the process; log it and, since the client is
+                // still waiting for a response, try to send it a fault instead of leaving
+                // it to time out.
+                m_logger.LogError(e, "WSLISTENER -Unexpected error processing request.");
+
+                try
+                {
+                    ServiceFault fault = EndpointBase.CreateFault(m_logger, request, e);
+                    ((WebSocketServerChannel)channel).SendResponse(requestId, fault);
+                }
+                catch (Exception faultException)
+                {
+                    m_logger.LogError(faultException, "WSLISTENER -Unexpected error sending service fault.");
+                }
             }
         }
 
@@ -591,7 +605,7 @@ namespace Opc.Ua.Bindings
             {
                 m_logger.LogError(
                     e,
-                    "TCPLISTENER - Unexpected error sending OpenSecureChannel Audit event.");
+                    "WSLISTENER -Unexpected error sending OpenSecureChannel Audit event.");
             }
         }
 
@@ -610,7 +624,7 @@ namespace Opc.Ua.Bindings
             {
                 m_logger.LogError(
                     e,
-                    "TCPLISTENER - Unexpected error sending CloseSecureChannel Audit event.");
+                    "WSLISTENER -Unexpected error sending CloseSecureChannel Audit event.");
             }
         }
 
@@ -629,7 +643,7 @@ namespace Opc.Ua.Bindings
             {
                 m_logger.LogError(
                     e,
-                    "TCPLISTENER - Unexpected error sending Certificate Audit event.");
+                    "WSLISTENER -Unexpected error sending Certificate Audit event.");
             }
         }
 
