@@ -4,8 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>UA.NETStandard.WebSocket</PackageId>
-    <Version>1.5.0-alpha.3</Version>
-    <Authors>Alzinar</Authors>
+    <Version>1.5.0-alpha.4</Version>
+    <Authors>alzinar</Authors>
     <Description>
       WebSocket transport implementation for OPC UA .NET Standard.
     </Description>
