@@ -10,7 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="UA.NETStandard.WebSocket" Version="1.5.0-*" />
+    <ProjectReference Include="../../src/UaWebSocket.csproj" />
     <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Client" Version="1.5.378.176" />
     <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Configuration"
       Version="1.5.378.176" />

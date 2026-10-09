@@ -10,7 +10,6 @@ SERVER_DIR="$REPO_ROOT/test/TestServer"
 CLIENT_DIR="$REPO_ROOT/test/TestClient"
 SERVER_LOG="$(mktemp)"
 CLIENT_LOG="$(mktemp)"
-WORK_DIR="$(mktemp -d)"
 
 SERVER_PID=""
 
@@ -24,7 +23,7 @@ cleanup() {
     kill -9 "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
   fi
-  rm -rf "$WORK_DIR" "$SERVER_LOG" "$CLIENT_LOG"
+  rm -rf "$SERVER_LOG" "$CLIENT_LOG"
 }
 trap cleanup EXIT
 
@@ -63,31 +62,9 @@ if [[ "$READY" -ne 1 ]]; then
   exit 1
 fi
 
-# The WebSocket transport's TLS handshake is validated by the OS/.NET certificate
-# trust store, not by the OPC UA CertificateValidator (see src/WebSocketMessageSocket.cs).
-# On Linux, .NET honors SSL_CERT_FILE for its trust store, so extend the system bundle
-# with the server's self-signed certificate for this run only - no system changes needed.
-CLIENT_ENV=()
-if [[ "$(uname -s)" == "Linux" ]]; then
-  SERVER_CERT_DER="$(find "$SERVER_DIR/pki/own/certs" -name '*.der' -print -quit 2>/dev/null || true)"
-  SYSTEM_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
-  if [[ -n "$SERVER_CERT_DER" && -f "$SYSTEM_BUNDLE" ]] && command -v openssl &>/dev/null; then
-    COMBINED_BUNDLE="$WORK_DIR/ca-bundle.pem"
-    openssl x509 -inform der -in "$SERVER_CERT_DER" >"$COMBINED_BUNDLE"
-    cat "$SYSTEM_BUNDLE" >>"$COMBINED_BUNDLE"
-    CLIENT_ENV+=("SSL_CERT_FILE=$COMBINED_BUNDLE")
-  else
-    echo "Warning: could not build a trust bundle for the server certificate;" \
-      "the client may fail to validate the server's TLS certificate."
-  fi
-else
-  echo "Warning: automatic TLS trust setup is only implemented for Linux." \
-    "On other platforms, trust the server certificate manually if the client fails to connect."
-fi
-
 echo "Running client..."
 set +e
-(cd "$CLIENT_DIR" && env "${CLIENT_ENV[@]}" dotnet "$CLIENT_DLL") >"$CLIENT_LOG" 2>&1
+(cd "$CLIENT_DIR" && dotnet "$CLIENT_DLL") >"$CLIENT_LOG" 2>&1
 CLIENT_EXIT=$?
 set -e
 

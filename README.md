@@ -30,12 +30,13 @@ using Opc.Ua.Bindings;
 // then connect as usual to an "opc.wss://" endpoint
 ```
 
-**Note on WSS certificate trust:** the WebSocket transport's TLS handshake is validated by the
-underlying .NET/OS certificate trust store, not by the OPC UA `CertificateValidator`. When
-connecting to a server with a self-signed certificate (e.g. for local testing), the client process
-must be configured to trust that certificate at the OS/.NET level — `AutoAcceptUntrustedCertificates`
-alone is not sufficient for the WSS transport layer. In production, use a certificate issued by a
-CA the client already trusts to avoid this entirely.
+**Note on WSS certificate trust:** the TLS handshake is validated by the OPC UA
+`CertificateValidator` of the application, on both sides. The server presents its application
+instance certificate and checks the client's TLS certificate (if sent) against its trust lists; the
+client checks the server's certificate against its own trust lists. `AutoAcceptUntrustedCertificates`
+and the `CertificateValidation` event therefore apply to WSS exactly as for `opc.tcp`, and no OS
+trust store configuration is needed. .NET/OS chain and host name errors are ignored in favor of the
+OPC UA validator's decision.
 
 ## AI Assistance
 This project was developed with the assistance of artificial intelligence (AI) tools. AI-generated code, suggestions, and documentation were reviewed, modified, and validated by the maintainers before inclusion in this repository.
